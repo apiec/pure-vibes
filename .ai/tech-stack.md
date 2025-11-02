@@ -1,0 +1,6 @@
+- Astro v5 - Modern web framework, configured for server-side rendering (SSR) with Node.js adapter
+- React v19 - UI library for interactive components
+- TypeScript v5 - Type-safe development
+- Tailwind CSS v4 - Utility-first CSS framework
+- Shadcn/ui - Component library (New York style)
+- Supabase - Backend services for authentication and database
