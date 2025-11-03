@@ -130,7 +130,6 @@ Required environment variables (see `.env.example`):
 
 - `SUPABASE_URL` - Supabase project URL
 - `SUPABASE_KEY` - Supabase anon/public key
-- `OPENROUTER_API_KEY` - OpenRouter API key (if using AI features)
 
 ## Configuration Files
 

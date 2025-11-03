@@ -32,7 +32,10 @@ This application solves these problems by providing:
 
 #### 3.1.1 User Registration
 - Users must create accounts using email and password through Supabase Authentication
-- Required fields: email address, password (minimum 8 characters)
+- Required fields: email address, username, password (minimum 8 characters)
+- Username requirements: 3-50 characters, alphanumeric only (no longer globally unique)
+- Friend code auto-generated on registration in format: `username#XXXXXX` (6 uppercase alphanumeric characters)
+- Friend code is globally unique and used to add users to playgroups
 - Email verification required before account activation
 - Password reset functionality via email
 
@@ -42,16 +45,44 @@ This application solves these problems by providing:
 - Logout functionality
 - Password recovery through email reset flow
 
+#### 3.1.3 User Account Deletion
+- Users can delete their accounts through account settings
+- Before deletion, all playgroup memberships are converted to non-user members
+- User's username is preserved in non_user_name field for historical data
+- Game history and statistics remain intact with preserved name
+- Conversion process:
+  1. For each playgroup membership, set member_type to 'non_user'
+  2. Copy username to non_user_name field
+  3. Set user_id to NULL
+  4. Delete auth.users record (cascades to profiles)
+- Non-user members retain their historical game participation and statistics
+- Non-user members appear in playgroup member lists but cannot log in
+- Limitation: Users who created playgroups cannot delete their accounts (database constraint)
+
 ### 3.2 Playgroup Management
+
+#### 3.2.0 Member Types
+Playgroup members use a dual member model:
+- **User Members**: Registered users with accounts who can log in and access the application
+- **Non-User Members**: Members without active user accounts (created when users delete their accounts or are manually added as named members without accounts)
+
+Both member types:
+- Are included in playgroup member lists
+- Have their game history preserved
+- Are included in playgroup statistics (when not removed)
+- Can be removed from playgroups (soft delete with `removed_at` timestamp)
+
+User members can be added by searching for their username. Non-user members are typically created automatically when user accounts are deleted, preserving historical data.
 
 #### 3.2.1 Playgroup Creation
 - Any authenticated user can create a new playgroup
 - Required fields:
-  - Playgroup name (unique per user, 3-50 characters)
+  - Playgroup name (3-50 characters, no uniqueness constraint)
 - Creator is automatically added as first member
 
 #### 3.2.2 Adding Members
-- Search for users by email or username
+- Add users to playgroup by entering their friend code (format: `username#XXXXXX`)
+- Exact friend code match required (no search/autocomplete functionality)
 - Add registered users to playgroup
 - No invite/approval workflow required (immediate addition)
 - Users can be members of multiple playgroups
@@ -61,8 +92,10 @@ This application solves these problems by providing:
 - Any playgroup member can remove any other member (including themselves)
 - Removing a member does not delete historical game data
 - Games played by removed members remain in history with their data intact
-- Removed members lose access to playgroup but their statistics are preserved
-- Re-adding a previously removed member restores their access to all historical data
+- Removed members lose access to playgroup (soft delete with removed_at timestamp)
+- Removed members are excluded from active member lists and statistics dashboards
+- Historical games still display removed member names for record-keeping
+- Re-adding a previously removed member restores their access and includes them in statistics again
 
 #### 3.2.4 Playgroup Browsing
 - Users see a list of all playgroups they are members of
@@ -76,6 +109,27 @@ This application solves these problems by providing:
 - See total games played
 - See date of first and most recent game
 - Edit playgroup name
+
+#### 3.2.6 Friend Code Display Strategy
+To maintain clean UI while supporting non-unique usernames, the application uses context-aware display:
+
+**Display username only:**
+- Playgroup member lists
+- Game history records
+- Statistics dashboard
+- Game detail views
+- All historical game participants
+
+**Display full friend code (username#XXXXXX):**
+- User profile/account settings page (with copy button)
+- Add member confirmation dialog (before adding to playgroup)
+- User registration success page
+- Any location where users need to share or copy their identifier
+
+**Rationale:**
+- Most users in a playgroup will have unique usernames, making full codes unnecessary in daily use
+- Full codes shown only when needed for identification or sharing
+- If duplicate usernames within a playgroup cause confusion post-MVP, disambiguation features can be added
 
 ### 3.3 Commander Database
 
@@ -118,7 +172,9 @@ This application solves these problems by providing:
 
 #### 3.4.2 Player Selection
 - Add playgroup members or past guests from a dropdown list
-- Add new guest players by entering name (free text, 2-30 characters)
+- Add new guest players with optional name entry (free text, 2-30 characters when provided)
+- Guest names are optional - guests can participate without a stored name
+- When provided, guest names are validated for length (2-30 characters)
 - Minimum players per game: 2
 - Maximum players per game: 10
 - Each player must be unique within a single game
@@ -188,13 +244,15 @@ This application solves these problems by providing:
 - Automatic recalculation when games are added/edited/deleted
 
 #### 3.6.2 Player Statistics
-For each playgroup member, display:
+For each active playgroup member (not removed), display:
 - Total games played
 - Total wins
 - Win rate percentage
 - Average finishing position
 - Most played commander (name and play count)
 - Best performing commander (name and win rate, minimum 5 games)
+- Removed members are excluded from this statistics view
+- Only members with removed_at = NULL are included
 
 #### 3.6.3 Commander Statistics
 Aggregate statistics across all commanders:
@@ -212,7 +270,7 @@ Overall playgroup statistics:
 - Most common player count (mode)
 
 #### 3.6.5 Trends and Visualizations
-- Win rate over time: line chart showing each player's win rate in rolling 30-game windows
+- Win rate over time: line chart showing each player's win rate in rolling 10-game windows
 - Starting position analysis: win rate by starting position (does going first matter?)
 - Games per month: bar chart showing game frequency over time
 - Charts use simple library
@@ -243,6 +301,8 @@ Overall playgroup statistics:
 - Cannot delete entire playgroup
 - Cannot modify another user's profile
 - Cannot access playgroups they are not a member of
+- Users who created playgroups cannot delete their accounts (database constraint prevents orphaned playgroups)
+- To delete account, user must first remove all playgroups they created or transfer ownership (transfer not in MVP)
 
 ## 4. Product Boundaries
 
@@ -250,7 +310,7 @@ Overall playgroup statistics:
 
 1. Email/password authentication via Supabase
 2. Playgroup creation and member management
-3. In-app user search by email/username for adding members
+3. Add members via friend code system (username#XXXXXX format)
 4. Game recording with full details (players, commanders, orders, date)
 5. Guest player support (non-member participants)
 6. Pre-computed commander database from Scryfall bulk data
@@ -258,11 +318,11 @@ Overall playgroup statistics:
 8. Game history browsing with list and detail views
 9. Comprehensive all-time statistics dashboard
 10. Data visualizations (charts for trends and distributions)
-11. CSV import for historical game data
-12. Equal permissions for all playgroup members
-13. Game editing and deletion capabilities
-14. Tie support in finishing positions
-15. Mobile-responsive design
+11. Equal permissions for all playgroup members
+12. Game editing and deletion capabilities
+13. Tie support in finishing positions
+14. Mobile-responsive design
+15. User account deletion with data preservation (converts to non-user members)
 
 ### 4.2 What is NOT Included in MVP
 
@@ -317,16 +377,22 @@ Overall playgroup statistics:
 
 #### US-001: User Registration
 Title: Create a new user account
-Description: As a new user, I want to create an account using my email and password so that I can access the application and create or join playgroups.
+Description: As a new user, I want to create an account using my email, username, and password so that I can access the application and create or join playgroups.
 Acceptance Criteria:
 - User can navigate to registration page from landing page
-- Form requires email address and password (minimum 8 characters)
+- Form requires email address, username, and password
 - Email validation ensures proper format
+- Username requirements: 3-50 characters, alphanumeric only (NOT globally unique)
+- Password requirements: minimum 8 characters
 - Password requirements displayed and enforced
 - Duplicate email addresses rejected with clear error message
+- Friend code automatically generated on registration in format: `username#XXXXXX` (6 uppercase alphanumeric characters)
+- Friend code is globally unique across all users
+- Friend code displayed prominently after registration with copy-to-clipboard functionality
 - Successful registration sends verification email
 - User redirected to "verify email" page after registration
 - Unverified accounts cannot access protected features
+- Friend code is used to add users to playgroups (not username search)
 
 #### US-002: Email Verification
 Title: Verify email address after registration
@@ -384,8 +450,7 @@ Description: As an authenticated user, I want to create a new playgroup so that 
 Acceptance Criteria:
 - "Create Playgroup" button visible on playgroups dashboard
 - Form requires playgroup name (3-50 characters)
-- Optional description field (up to 500 characters)
-- Playgroup name uniqueness validated per user
+- No uniqueness constraint on playgroup names
 - Creator automatically added as first member
 - Successful creation redirects to playgroup details page
 - New playgroup set as active playgroup
@@ -403,27 +468,30 @@ Acceptance Criteria:
 - List sorted by most recently active (last game date)
 - Clicking playgroup card sets it as active and navigates to details
 
-#### US-008: Search for Users
-Title: Find users to add to playgroup
-Description: As a playgroup member, I want to search for registered users by email or username so that I can add them to my playgroup.
+#### US-008: View Own Friend Code
+Title: View and share my friend code
+Description: As a user, I want to view and copy my friend code so that I can share it with others to be added to playgroups.
 Acceptance Criteria:
-- Search input field on "Add Member" interface
-- Search accepts email address or username
-- Case-insensitive partial matching supported
-- Search results display username and email
-- Maximum 20 results shown
-- Only verified users appear in results
-- Users already in playgroup excluded from results
-- "No results found" message when search yields nothing
-- Clear search button to reset results
+- Friend code visible on user profile/account settings page
+- Friend code displayed in format: `username#XXXXXX`
+- "Copy to clipboard" button next to friend code
+- Visual confirmation when friend code copied successfully
+- Tooltip or help text explaining what friend code is used for
+- Friend code is permanent (cannot be regenerated in MVP)
+- Friend code visible immediately after registration
 
-#### US-009: Add Member to Playgroup
-Title: Add a user to playgroup
-Description: As a playgroup member, I want to add other registered users to my playgroup so that they can participate in game tracking.
+#### US-009: Add Member by Friend Code
+Title: Add a user to playgroup using friend code
+Description: As a playgroup member, I want to add other registered users to my playgroup by entering their friend code so that they can participate in game tracking.
 Acceptance Criteria:
 - "Add Member" button visible in playgroup details
-- User search interface displayed
-- Clicking user from search results adds them immediately
+- Input field for entering friend code (format: `username#XXXXXX`)
+- Format validation on input (alphanumeric username, # separator, 6 uppercase alphanumeric code)
+- Exact match required - no search or autocomplete
+- Error message shown if friend code format invalid
+- Error message shown if friend code doesn't exist
+- Error message shown if user already in playgroup
+- Confirmation dialog shows full friend code and username before adding
 - No invitation or approval workflow required
 - New member immediately gains full access to playgroup
 - New member sees playgroup in their playgroups list
@@ -449,7 +517,6 @@ Acceptance Criteria:
 Title: See detailed information about a playgroup
 Description: As a playgroup member, I want to view comprehensive details about my playgroup so that I understand its current state and history.
 Acceptance Criteria:
-- Playgroup details page shows name and description
 - Complete member list displayed with usernames
 - Total games played count shown
 - Date of first game displayed
@@ -633,8 +700,7 @@ Acceptance Criteria:
 - Confirmation shows game date and winner for verification
 - Deleted game removed from history list
 - Deleted game excluded from all statistics
-- Soft delete in database (data retained but marked deleted)
-- No recovery mechanism in MVP
+- Hard delete - game permanently removed from database
 - Success notification shown
 - User redirected to game history list
 - Statistics recalculated automatically
@@ -649,7 +715,7 @@ Acceptance Criteria:
 - Section for each playgroup member displayed
 - For each member show: total games, total wins, win rate %, average finishing position
 - Most played commander shown with play count
-- Best performing commander shown with win rate (minimum 3 games)
+- Best performing commander shown with win rate (minimum 5 games)
 - Statistics include only games where player was a member (not guest)
 - Empty state for members with no games
 - Statistics update automatically when games added/edited/deleted
